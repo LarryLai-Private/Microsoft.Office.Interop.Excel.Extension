@@ -2,11 +2,10 @@
 using System.Data;
 using System.Reflection;
 
-using ExcelApp = Microsoft.Office.Interop.Excel.Application;
-
 namespace Microsoft.Office.Interop.Excel.Extension
 {
     using Microsoft.Office.Interop.Excel;
+    using System.Runtime.InteropServices;
 
     static public class ExcelFunc
     {
@@ -14,7 +13,7 @@ namespace Microsoft.Office.Interop.Excel.Extension
         /// CloseExcel
         /// </summary>
         /// <param name="excelApp"></param>
-        static public void CloseExcel(ExcelApp excelApp)
+        static public void CloseExcel(Application excelApp)
         {
             if (excelApp != null)
             {
@@ -38,7 +37,7 @@ namespace Microsoft.Office.Interop.Excel.Extension
         /// <param name="FullPath"></param>
         static public void OpenToPrintPreview(string FullPath)
         {
-            ExcelApp excelApp = new ExcelApp();
+            var excelApp = new Application();
 
             try
             {
@@ -163,10 +162,10 @@ namespace Microsoft.Office.Interop.Excel.Extension
             #region CreateExcel
             static public Workbook CreateExcel(DataSet dSet, DataTableToWorksheet_ColumnsType columnsType, bool Visible = true, bool DisplayAlerts = true, bool ColumnsAutoFit = true, string DefFormat = "@")
             {
-                ExcelApp excelApp;
+                Application excelApp;
                 try
                 {
-                    excelApp = new ExcelApp
+                    excelApp = new Application
                     {
                         //一開始先關閉警告跟隱藏,等工作完成再套用參數
                         DisplayAlerts = false,
@@ -295,6 +294,102 @@ namespace Microsoft.Office.Interop.Excel.Extension
 
         public class Import
         {
+            static public Workbook GetWorkbook(string ExcelFilePath)
+            {
+                var application = new Application()
+                {
+                    DisplayAlerts = false,
+                    Visible = false
+                };
+
+                try
+                {
+                    return application.Workbooks.Open(ExcelFilePath);
+                }
+                finally
+                {
+                    //注意: Excel是Unmanaged程式，要妥善結束才能乾淨不留痕跡
+                    //否則，很容易留下一堆excel.exe在記憶體中
+                    //所有用過的COM+物件都要使用Marshal.FinalReleaseComObject清掉
+                    //COM+物件的Reference Counter，以利結束物件回收記憶體
+                    //if (sheet != null)
+                    //{
+                    //    Marshal.FinalReleaseComObject(sheet);
+                    //}
+                    //if (wrkBook != null)
+                    //{
+                    //    wrkBook.Close(false); //忽略尚未存檔內容，避免跳出提示卡住
+                    //    Marshal.FinalReleaseComObject(wrkBook);
+                    //}
+                    if (application != null)
+                    {
+                        application.Workbooks.Close();
+                        application.Quit();
+                        Marshal.FinalReleaseComObject(application);
+                    }
+                }
+            }
+            static public Worksheet GetWorkSheet(Workbook workbook, string SheetIndex) => (Worksheet)workbook.Sheets[SheetIndex];
+            static public Worksheet GetWorkSheet(Workbook workbook, int SheetIndex = 1) => (Worksheet)workbook.Sheets[SheetIndex];
+            static public System.Data.DataTable GetDataTable(Worksheet worksheet, bool hasTitleRow = true)
+            {
+                System.Data.DataTable dataTable = new System.Data.DataTable();
+
+                //取得有資料的範圍
+                Range range = worksheet.UsedRange.CurrentRegion;
+
+                int index = 1;
+                if (hasTitleRow)
+                {
+
+                    for (int j = 1; j <= range.Columns.Count; j++)
+                    {
+                        Range cell = (Range)range.Cells[1, j];
+                        dataTable.Columns.Add(cell.Value2.ToString());
+                    }
+                    index++;
+                }
+                else
+                {
+                    for (int j = 1; j <= range.Columns.Count; j++)
+                    {
+                        string col = j.ToString();
+                        dataTable.Columns.Add(col);
+                    }
+                }
+
+                for (int row = index; row <= range.Rows.Count; row++)
+                {
+                    DataRow newRow = dataTable.NewRow();
+
+                    for (int col = 0; col < range.Columns.Count; col++)
+                    {
+                        Range cell = (Range)range.Cells[row, col+1];
+                        object value;
+                        if (cell.Value2 == null)
+                        {
+                            value = string.Empty;
+                        }
+                        else
+                        {
+                            value = cell.Value2;
+                        }
+                        newRow[col] = value;
+                    }
+
+                    dataTable.Rows.Add(newRow);
+                }
+
+                return dataTable;
+            }
+
+            static public System.Data.DataTable TestGetDataTable(string ExcelFilePath)
+            {
+                var workbook = GetWorkbook(ExcelFilePath);
+                var wrokSheet = GetWorkSheet(workbook);
+                return WorkSheetToDataTable(wrokSheet);
+            }
+
             /// <summary>
             /// WorkSheetToDataTable
             /// </summary>
@@ -361,7 +456,7 @@ namespace Microsoft.Office.Interop.Excel.Extension
             {
                 System.Data.DataTable dt = new System.Data.DataTable();
 
-                ExcelApp excelApp = new ExcelApp()
+                var excelApp = new Application()
                 {
                     DisplayAlerts = false,
                     Visible = false
@@ -404,7 +499,7 @@ namespace Microsoft.Office.Interop.Excel.Extension
             {
                 System.Data.DataTable dt = new System.Data.DataTable();
 
-                ExcelApp excelApp = new ExcelApp()
+                var excelApp = new Application()
                 {
                     DisplayAlerts = false,
                     Visible = false
@@ -425,6 +520,140 @@ namespace Microsoft.Office.Interop.Excel.Extension
                 return dt;
             }
 
+        }
+    }
+
+
+    public class ExcelTool
+    {
+        System.Data.DataTable GetDataTableFormWorkSheet(Worksheet worksheet, bool hasTitleRow = true)
+        {
+            System.Data.DataTable dataTable = new System.Data.DataTable();
+
+            //取得有資料的範圍
+            Range range = worksheet.UsedRange.CurrentRegion;
+
+            int index = 1;
+            if (hasTitleRow)
+            {
+
+                for (int j = 1; j <= range.Columns.Count; j++)
+                {
+                    Range cell = (Range)range.Cells[1, j];
+                    dataTable.Columns.Add(cell.Value2.ToString());
+                }
+                index++;
+            }
+            else
+            {
+                for (int j = 1; j <= range.Columns.Count; j++)
+                {
+                    string col = j.ToString();
+                    dataTable.Columns.Add(col);
+                }
+            }
+
+            for (int row = index; row <= range.Rows.Count; row++)
+            {
+                DataRow newRow = dataTable.NewRow();
+
+                for (int col = 0; col < range.Columns.Count; col++)
+                {
+                    Range cell = (Range)range.Cells[row, col + 1];
+                    object value;
+                    if (cell.Value2 == null)
+                    {
+                        value = string.Empty;
+                    }
+                    else
+                    {
+                        value = cell.Value2;
+                    }
+                    newRow[col] = value;
+                }
+
+                dataTable.Rows.Add(newRow);
+            }
+
+            return dataTable;
+        }
+
+
+        delegate object Delegate_ProcessApplication(Application application);
+        object ProcessApplication(string excelFilePath, Delegate_ProcessApplication delegate_func)
+        {
+            Application application = null;
+            try
+            {
+                application = new Application()
+                {
+                    DisplayAlerts = false,
+                    Visible = false,
+                };
+                return delegate_func.Invoke(application);
+            }
+            finally
+            {
+                if (application != null)
+                {
+                    application.Workbooks.Close();
+                    application.Quit();
+                    Marshal.FinalReleaseComObject(application);
+                }
+            }
+        }
+
+        delegate object Delegate_ProcessWorkbook(Workbook workbook);
+        object ProcessWorkbook(string excelFilePath, Delegate_ProcessWorkbook delegate_func)
+        {
+            return ProcessApplication(excelFilePath, new Delegate_ProcessApplication(delegate(Application application)
+            {
+                Workbook workbook = null;
+                try
+                {
+                    workbook = application.Workbooks.Open(excelFilePath);
+                    return delegate_func.Invoke(workbook);
+                }
+                finally
+                {
+                    if (workbook != null)
+                    {
+                        workbook.Close(false); //忽略尚未存檔內容，避免跳出提示卡住
+                        Marshal.FinalReleaseComObject(workbook);
+                    }
+                }
+            }
+            ));
+        }
+
+        delegate object Delegate_ProcessWorksheet(Worksheet worksheet);
+        object ProcessWorksheet(string excelFilePath, Delegate_ProcessWorksheet delegate_func, object SheetIndex)
+        {
+            return ProcessWorkbook(excelFilePath, new Delegate_ProcessWorkbook(delegate (Workbook workbook)
+            {
+                Worksheet worksheet = null;
+                try
+                {
+                    worksheet = (Worksheet)workbook.Sheets[SheetIndex];
+                    return delegate_func.Invoke(worksheet);
+                }
+                finally
+                {
+                    if (worksheet != null)
+                    {
+                        Marshal.FinalReleaseComObject(worksheet);
+                    }
+                }
+            }));
+        }
+
+
+        public System.Data.DataTable GetTableFormExcel(string excelFilePath, object SheetIndex)
+        {
+            return (System.Data.DataTable)ProcessWorksheet(excelFilePath, new Delegate_ProcessWorksheet(delegate(Worksheet worksheet)
+            {
+                return GetDataTableFormWorkSheet(worksheet);
+            }), SheetIndex);
         }
     }
 }
